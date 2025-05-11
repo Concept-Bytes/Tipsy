@@ -1,0 +1,12 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environment
+.env
+
+# App-specific files
+cocktails.json
+pump_config.json
+drink_logos/

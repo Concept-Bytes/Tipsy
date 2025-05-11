@@ -3,6 +3,7 @@ from pydantic import BaseModel
 import os
 from openai import OpenAI, OpenAIError
 
+
 def get_client():
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
@@ -18,7 +19,7 @@ class Cocktail(BaseModel):
 class CocktailResponse(BaseModel):
     cocktails: list[Cocktail]
 
-def generate_cocktails(pump_to_drink: dict, requests_for_bartender: str = "") -> dict:
+def generate_cocktails(pump_to_drink: dict, requests_for_bartender: str = "", exclude_existing: bool = True) -> dict:
     prompt = (
         "You are a creative cocktail mixologist. Based on the following pump configuration, "
         "generate a list of cocktail recipes. For each cocktail, provide a normal cocktail name, "
@@ -39,7 +40,15 @@ def generate_cocktails(pump_to_drink: dict, requests_for_bartender: str = "") ->
         "}\n\n"
         "Now, use the following pump configuration creatively to generate your cocktail recipes:\n"
         f"{json.dumps(pump_to_drink, indent=2)}\n\n"
+        "Also include each type of liquor available as it's own drink, served neat with the normal cocktail name being the name of the liquor\n\n"
     )
+    if exclude_existing:
+        from helpers import load_cocktails
+        prompt += (
+            "Do not include the following cocktails, which I already have recipes for:\n\n"
+            f"{json.dumps(load_cocktails(), indent=2)}\n\n"
+        )
+
     if requests_for_bartender.strip():
         prompt += f"Requests for the bartender: {requests_for_bartender.strip()}\n"
 

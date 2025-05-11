@@ -164,6 +164,17 @@ The `controller.py` script will:
 
 ---
 
+## Configuration Options
+
+Several settings can be configured via environment variables, or in a .env file.
+* OPENAI_API_KEY: Your API key for OpenAI. This is set when you first run the streamlit app.
+* OZ_COEFFICIENT: The number of seconds required for your pumps to pour 1oz of liquid.
+* INVERT_PUMP_PINS: Set to 'true' to invert the direction of your pumps.
+* PUMP_CONCURRENCY: The number of pumps that should run simultaneously.
+* FULL_SCREEN: Set to 'false' to disable full screen mode for the PyGame interface. Useful for debugging.
+
+---
+
 ## Troubleshooting
 
 - **GPIO Issues:**  
