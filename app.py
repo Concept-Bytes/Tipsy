@@ -1,24 +1,19 @@
 import os
 import json
 import base64
-import requests
 import streamlit as st
-from dotenv import load_dotenv, set_key
+from dotenv import set_key
 import assist
-from rembg import remove
-from PIL import Image
+
+from settings import *
+from helpers import *
 
 # Import your controller module
-try:
-    import controller
-except ModuleNotFoundError:
-    print('Controller modules not found. Pump control will be disabled')
+import controller
 
-# Load .env variables
-load_dotenv()
 
 # ---------- API KEY SETUP ----------
-if not os.getenv("OPENAI_API_KEY") and "openai_api_key" not in st.session_state:
+if not OPENAI_API_KEY and "openai_api_key" not in st.session_state:
     st.title("Enter OpenAI API Key")
     key_input = st.text_input("OpenAI API Key", type="password")
     if st.button("Submit"):
@@ -27,10 +22,6 @@ if not os.getenv("OPENAI_API_KEY") and "openai_api_key" not in st.session_state:
         st.rerun()
     st.stop()
 
-# ---------- Global Setup ----------
-CONFIG_FILE = "pump_config.json"
-COCKTAILS_FILE = "cocktails.json"
-LOGO_FOLDER = "drink_logos"
 
 if not os.path.exists(LOGO_FOLDER):
     os.makedirs(LOGO_FOLDER)
@@ -39,52 +30,26 @@ if not os.path.exists(LOGO_FOLDER):
 if "selected_cocktail" not in st.session_state:
     st.session_state.selected_cocktail = None
 
-# ---------- Helper Functions ----------
-def load_saved_config():
-    if os.path.exists(CONFIG_FILE):
-        try:
-            with open(CONFIG_FILE, "r") as f:
-                return json.load(f)
-        except Exception as e:
-            st.error(f"Error loading configuration: {e}")
-    return {}
 
-def save_config(data):
+saved_config = load_saved_config()
+# Load the cocktails from file
+cocktail_data = {}
+if os.path.exists(COCKTAILS_FILE):
     try:
-        with open(CONFIG_FILE, "w") as f:
-            json.dump(data, f, indent=2)
+        with open(COCKTAILS_FILE, "r") as f:
+            cocktail_data = json.load(f)
     except Exception as e:
-        st.error(f"Error saving configuration: {e}")
+        st.error(f"Error loading cocktails: {e}")
 
-def load_cocktails():
-    if os.path.exists(COCKTAILS_FILE):
-        try:
-            with open(COCKTAILS_FILE, "r") as f:
-                return json.load(f)
-        except Exception as e:
-            st.error(f"Error loading cocktails: {e}")
-    return {}
-
-def save_cocktails(data):
-    try:
-        with open(COCKTAILS_FILE, "w") as f:
-            json.dump(data, f, indent=2)
-    except Exception as e:
-        st.error(f"Error saving cocktails: {e}")
-
-def get_safe_name(name):
-    """Convert a cocktail name to a safe filename-friendly string."""
-    return name.lower().replace(" ", "_")
 
 # ---------- Tabs ----------
-tabs = st.tabs(["My Bar", "Settings", "Cocktail Menu"])
+tabs = st.tabs(["My Bar", "Settings", "Cocktail Menu", "Add Cocktail"])
 
 # ================ TAB 1: My Bar ================
 with tabs[0]:
     st.markdown("<h1 style='text-align: center;'>My Bar</h1>", unsafe_allow_html=True)
     st.markdown("<p style='text-align: center;'>Enter the drink names for each pump:</p>", unsafe_allow_html=True)
     
-    saved_config = load_saved_config()
     pump_inputs = {}
 
     col1, col2 = st.columns(2)
@@ -117,6 +82,7 @@ with tabs[0]:
 
     st.markdown("<h3 style='text-align: center;'>Requests for the bartender</h3>", unsafe_allow_html=True)
     bartender_requests = st.text_area("Enter any special requests for the bartender", height=100)
+    clear_cocktails = st.checkbox("Remove existing cocktails from the menu")
 
     if st.button("Generate Recipes"):
         pump_to_drink = {pump: drink for pump, drink in pump_inputs.items() if drink.strip()}
@@ -126,45 +92,18 @@ with tabs[0]:
         st.markdown(f"<p style='text-align: center;'>Pump configuration: {pump_to_drink}</p>", unsafe_allow_html=True)
         
         # Ask AI to generate cocktails from these pumps + bartender requests
-        cocktails_json = assist.generate_cocktails(pump_to_drink, bartender_requests)
-        save_cocktails(cocktails_json)
+        cocktails_json = assist.generate_cocktails(pump_to_drink, bartender_requests, not clear_cocktails)
+        save_cocktails(cocktails_json, not clear_cocktails)
         
         st.markdown("<h2 style='text-align: center;'>Generating Cocktail Logos...</h2>", unsafe_allow_html=True)
-        image_paths = {}
         cocktails = cocktails_json.get("cocktails", [])
         total = len(cocktails) if cocktails else 1
         progress_bar = st.progress(0, text="Generating images...")
 
         for idx, cocktail in enumerate(cocktails):
             normal_name = cocktail.get("normal_name", "unknown_drink")
-            safe_cname = get_safe_name(normal_name)
-            filename = os.path.join(LOGO_FOLDER, f"{safe_cname}.png")
-
-            if os.path.exists(filename):
-                # If it already exists, skip generation
-                image_paths[normal_name] = filename
-            else:
-                prompt = (
-                    f"A realistic illustration of a {normal_name} cocktail on a plain white background. "
-                    "The lighting and shading create depth and realism, making the drink appear fresh and inviting."
-                )
-                try:
-                    # 1) Generate the image URL
-                    image_url = assist.generate_image(prompt)
-
-                    # 2) Download + remove background in memory
-                    img_data = requests.get(image_url).content
-                    from io import BytesIO
-                    with Image.open(BytesIO(img_data)).convert("RGBA") as original_img:
-                        bg_removed = remove(original_img)
-                        bg_removed.save(filename, "PNG")
-
-                    image_paths[normal_name] = filename
-
-                except Exception as e:
-                    image_paths[normal_name] = f"Error: {e}"
-
-                progress_bar.progress((idx + 1) / total)
+            generate_image(normal_name)
+            progress_bar.progress((idx + 1) / total)
 
         progress_bar.empty()
         st.success("Image generation complete.")
@@ -195,15 +134,6 @@ with tabs[1]:
 # ================ TAB 3: Cocktail Menu ================
 with tabs[2]:
     st.markdown("<h1 style='text-align: center;'>Cocktail Menu</h1>", unsafe_allow_html=True)
-
-    # Load the cocktails from file
-    cocktail_data = {}
-    if os.path.exists(COCKTAILS_FILE):
-        try:
-            with open(COCKTAILS_FILE, "r") as f:
-                cocktail_data = json.load(f)
-        except Exception as e:
-            st.error(f"Error loading cocktails: {e}")
 
     if st.session_state.selected_cocktail:
         # USER IS VIEWING A COCKTAIL DETAIL PAGE
@@ -281,13 +211,16 @@ with tabs[2]:
 
             with cols[1]:
                 if st.button("Pour"):
-                    st.info("Pouring a single serving...")
+                    note = st.info("Pouring a single serving...")
                     # We call controller.make_drink with single
                     # Build a dictionary that matches what the controller expects
                     # The 'selected_cocktail' is already a dict from cocktails.json
                     # so we can pass it directly.
                     try:
-                        controller.make_drink(CONFIG_FILE, selected_cocktail, single_or_double="single")
+                        executor_watcher = controller.make_drink(selected_cocktail, single_or_double="single")
+                        while not executor_watcher.done():
+                            pass
+                        note.empty()
                     except Exception as e:
                         st.error(f"Error while pouring: {e}")
 
@@ -326,10 +259,43 @@ with tabs[2]:
                     if st.button("Pour", key=f"pour_{safe_cname}"):
                         # If they pour from the gallery, we can do single as well,
                         # but we have no way to adjust recipe first. We'll just pour the default recipe.
-                        st.info(f"Pouring a single serving of {normal_name} ...")
+                        note = st.info(f"Pouring a single serving of {normal_name} ...")
                         try:
-                            controller.make_drink(CONFIG_FILE, cocktail, single_or_double="single")
+                            executor_watcher = controller.make_drink(cocktail, single_or_double="single")
+                            while not executor_watcher.done():
+                                pass
+                            note.empty()
                         except Exception as e:
                             st.error(f"Error while pouring: {e}")
         else:
             st.markdown("<p style='text-align: center;'>No recipes generated yet. Please use the 'My Bar' tab to generate recipes.</p>", unsafe_allow_html=True)
+
+# ================ TAB 4: Add Cocktail ================
+with tabs[3]:
+    st.markdown("<h1 style='text-align: center;'>Add Cocktail</h1>", unsafe_allow_html=True)
+    st.markdown("<h2 style='text-align: center;'>Recipe</h2>", unsafe_allow_html=True)
+    recipe = {
+        'ingredients': {}
+    }
+
+    recipe['normal_name'] = st.text_input(
+        label='Cocktail Name'
+    )
+    recipe['fun_name'] = recipe['normal_name']
+
+    for index, pump in enumerate(saved_config):
+        ingredient = saved_config[pump]
+        value = st.slider(
+            f"{ingredient} (oz)",
+            min_value=0.0,
+            max_value=4.0,
+            value=0.0,
+            step=0.25,
+        )
+        if value > 0:
+            recipe['ingredients'][ingredient] = f"{value} oz".strip()
+
+    if st.button("Save") and recipe['normal_name'] and len(recipe['ingredients']) > 0:
+        if recipe['normal_name'] not in list(map(lambda x: x['normal_name'], cocktail_data['cocktails'])):
+            generate_image(recipe['normal_name'])
+            save_cocktails({'cocktails': [recipe]})
